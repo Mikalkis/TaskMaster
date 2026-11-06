@@ -67,8 +67,10 @@ std::string normalize_task_line(const std::string& line) {
 }
 
 std::string add_done_mark(const std::string& task_text) {
-    // Как в питоновской версии: старая метка снимается, вторая ✅ появиться не может.
-    return std::string(DONE_MARK_EMOJI) + " " + remove_done_mark(task_text);
+    // Монохромный ✔ вместо цветного ✅: RichEdit красит ✔ цветом строки,
+    // цветной глиф эмодзи перекрасить нельзя — иначе покраска выходит рябой.
+    // Старые файлы с ✅ читаются и отобразятся как ✔, совместимость полная.
+    return std::string(DONE_MARK_CHECK) + " " + remove_done_mark(task_text);
 }
 
 std::string remove_done_mark(const std::string& task_text) {

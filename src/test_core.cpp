@@ -36,6 +36,7 @@ std::string vk_right(const std::string& expected, const std::string& actual,
 }
 
 const char UTF8_DONE_EMOJI[] = "\xE2\x9C\x85";  // ✅
+const char UTF8_DONE_CHECK[] = "\xE2\x9C\x94";  // ✔
 
 std::filesystem::path make_temp_base_dir(const std::string& tag) {
     std::filesystem::path dir = std::filesystem::temp_directory_path() /
@@ -53,17 +54,22 @@ void test_task_utils() {
     check(!taskmaster::is_task_done("просто задача"), "not done cyrillic");
     check(!taskmaster::is_task_done("✋ рука"), "not done other emoji");
 
-    vk_right(std::string(UTF8_DONE_EMOJI) + " купить молоко",
+    // Приложение теперь пишет монохромный ✔ вместо цветного ✅.
+    vk_right(std::string(UTF8_DONE_CHECK) + " купить молоко",
              taskmaster::add_done_mark("купить молоко"), "add done mark");
-    vk_right(std::string(UTF8_DONE_EMOJI) + " работа",
+    vk_right(std::string(UTF8_DONE_CHECK) + " работа",
              taskmaster::add_done_mark(std::string(UTF8_DONE_EMOJI) + "  работа"),
              "add done mark idempotent");
     vk_right("работа", taskmaster::remove_done_mark(std::string(UTF8_DONE_EMOJI) + " работа"),
              "remove done mark");
     vk_right("работа", taskmaster::remove_done_mark("работа"), "remove done mark no-op");
 
-    vk_right(std::string(UTF8_DONE_EMOJI) + " a", taskmaster::toggle_done_mark("a"), "toggle on");
-    vk_right("a", taskmaster::toggle_done_mark(std::string(UTF8_DONE_EMOJI) + " a"), "toggle off");
+    vk_right(std::string(UTF8_DONE_CHECK) + " a", taskmaster::toggle_done_mark("a"), "toggle on");
+    vk_right("a",
+             taskmaster::toggle_done_mark(std::string(UTF8_DONE_CHECK) + " a"), "toggle off");
+    // Старая метка ✅ из питоновской версии тоже снимается — обратная совместимость.
+    vk_right("a", taskmaster::toggle_done_mark(std::string(UTF8_DONE_EMOJI) + " a"),
+             "toggle off old emoji");
     // Идемпотентность питоновского багфикса: двойной вызов возвращает исходный текст.
     vk_right("a", taskmaster::toggle_done_mark(taskmaster::toggle_done_mark("a")),
              "toggle double round");
@@ -153,19 +159,29 @@ void test_window_state() {
     std::cout << "-- window_state\n";
     const std::filesystem::path file = make_temp_base_dir("state") / "window_state.json";
 
-    taskmaster::save_window_size(file, 824, 668);
-    const auto [width, height] = taskmaster::load_window_size(file, 320, 400);
-    check(width == 824 && height == 668, "window size roundtrip");
+    // Файла нет — дефолт без позиции (первый запуск).
+    const auto initial = taskmaster::load_window_geometry(file, 320, 400);
+    check(initial.width == 320 && initial.height == 400 && !initial.has_position,
+          "window state first run default");
 
-    // Меньше минимума — откат на дефолт.
-    taskmaster::save_window_size(file, 100, 10);
-    const auto clamped = taskmaster::load_window_size(file, 320, 400);
-    check(clamped.first == 320 && clamped.second == 400, "window size clamped");
+    taskmaster::save_window_geometry(file, 824, 668, -14, 220);
+    const auto roundtrip = taskmaster::load_window_geometry(file, 320, 400);
+    check(roundtrip.width == 824 && roundtrip.height == 668 &&
+              roundtrip.x == -14 && roundtrip.y == 220 && roundtrip.has_position,
+          "window geometry roundtrip");
 
-    // Битые данные — дефолт.
+    // Меньше минимума — откат размера на дефолт, позиция сохраняется.
+    taskmaster::save_window_geometry(file, 100, 10, 5, 7);
+    const auto clamped = taskmaster::load_window_geometry(file, 320, 400);
+    check(clamped.width == 320 && clamped.height == 400 &&
+              clamped.has_position && clamped.x == 5 && clamped.y == 7,
+          "window geometry clamped");
+
+    // Битые данные — дефолт и без позиции.
     std::ofstream(file, std::ios::binary) << "not json";
-    const auto broken = taskmaster::load_window_size(file, 320, 400);
-    check(broken.first == 320 && broken.second == 400, "window size broken json");
+    const auto broken = taskmaster::load_window_geometry(file, 320, 400);
+    check(broken.width == 320 && broken.height == 400 && !broken.has_position,
+          "window state broken json");
     std::filesystem::remove_all(file.parent_path());
 }
 

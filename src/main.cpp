@@ -84,15 +84,6 @@ std::string get_edit_text(HWND edit) {
     return content;
 }
 
-// UTF-16 длина ведущей метки задачи: ✅/✔ занимают одну кодовую единицу; иначе 0.
-int done_mark_utf16_len(const std::string& task) {
-    if (task.compare(0, 3, "\xE2\x9C\x85") == 0 ||  // ✅
-        task.compare(0, 3, "\xE2\x9C\x94") == 0) {  // ✔
-        return 1;
-    }
-    return 0;
-}
-
 }  // namespace
 
 // -----------------------------------------------------------------------
@@ -100,11 +91,19 @@ int done_mark_utf16_len(const std::string& task) {
 namespace {
 
 // Полная перерисовка поля задач: нумерация и зелёный цвет выполненных задач.
+// Выполненные задачи отображаются монохромным ✔ (красится цветом строки);
+// сохранённый в файле ✅ тоже отображается как ✔ — покраска всегда ровная.
 void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
+    const char DONE_MARK_CHECK_UTF8[] = "\xE2\x9C\x94";  // ✔
+
     std::string rendered;
     std::vector<int> line_length_utf16;  // длина "N. задача" без \r\n
     for (size_t i = 0; i < tasks.size(); ++i) {
-        const std::string line = std::to_string(i + 1) + ". " + tasks[i];
+        std::string task = tasks[i];
+        if (is_task_done(task)) {
+            task = std::string(DONE_MARK_CHECK_UTF8) + " " + remove_done_mark(task);
+        }
+        const std::string line = std::to_string(i + 1) + ". " + task;
         line_length_utf16.push_back(static_cast<int>(to_utf16(line).size()));
         rendered += line;
         rendered += "\r\n";
@@ -128,7 +127,7 @@ void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
     SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
                  reinterpret_cast<LPARAM>(&reset_format));
 
-    // Зелёный для выполненных задач.
+    // Зелёный для выполненных строк целиком: ✔ монохромный, красится тем же цветом.
     CHARFORMAT2W done_format = {};
     done_format.cbSize = sizeof(done_format);
     done_format.dwMask = CFM_COLOR;
@@ -146,33 +145,18 @@ void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
         SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&range));
         SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
                      reinterpret_cast<LPARAM>(&done_format));
-
-        // Метке ✅ явно назначаем Segoe UI Emoji: без этого RichEdit рисует её
-        // монохромным фолбэком, и строка выглядит пёстро (серый значок на зелёном).
-        const int mark_len = done_mark_utf16_len(tasks[i]);
-        if (mark_len > 0) {
-            const int numbering = static_cast<int>(
-                to_utf16(std::to_string(i + 1) + ". ").size());
-            CHARFORMAT2W mark_format = {};
-            mark_format.cbSize = sizeof(mark_format);
-            mark_format.dwMask = CFM_COLOR | CFM_FACE | CFM_CHARSET;
-            mark_format.crTextColor = DONE_COLOR;
-            mark_format.bCharSet = DEFAULT_CHARSET;
-            wcscpy_s(mark_format.szFaceName, L"Segoe UI Emoji");
-            CHARRANGE mark_range{line_start + numbering,
-                                 line_start + numbering + mark_len};
-            SendMessageW(edit, EM_EXSETSEL, 0,
-                         reinterpret_cast<LPARAM>(&mark_range));
-            SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
-                         reinterpret_cast<LPARAM>(&mark_format));
-        }
     }
 
-    CHARRANGE caret_end{text_length, text_length};
-    SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&caret_end));
+    // Каретка в начало: вьюпорт RichEdit после программной заливки с
+    // отключённой отрисовкой остаётся «пустым» до первой прокрутки;
+    // SCARET+принудительная перерисовка инициализирует его.
+    CHARRANGE caret_top{0, 0};
+    SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&caret_top));
+    SendMessageW(edit, EM_SCROLLCARET, 0, 0);
 
     SendMessageW(edit, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(edit, nullptr, TRUE);
+    UpdateWindow(edit);
 }
 
 // Контекст модального окна «Новый список».
@@ -267,14 +251,22 @@ void save_current_tasks(TodoApp& app) {
     app.random_range = {0, 0};
 }
 
-// Сохранение по прямому действию пользователя: как в питоне — с сообщением.
+// Заголовок окна отражает активный список (ориентир без взгляда в комбо-бокс);
+// suffix — дополнение вроде отметки сохранения.
+void update_window_title(TodoApp& app, const wchar_t* suffix = nullptr) {
+    const std::wstring title =
+        std::wstring(WINDOW_TITLE) + L" — " +
+        to_utf16(app.list_service->active_list_name()) +
+        (suffix == nullptr ? L"" : suffix);
+    SetWindowTextW(app.window, title.c_str());
+}
+
+// Сохранение по прямому действию пользователя; подтверждение — в заголовке.
 void save_with_message(TodoApp& app) {
     save_current_tasks(app);
-    const std::wstring message =
-        L"Изменения сохранены в '" + to_utf16(app.list_service->active_list_name()) +
-        L"'.";
-    MessageBoxW(app.window, message.c_str(), L"Сохранено",
-                MB_OK | MB_ICONINFORMATION);
+    // Вместо модального бокса: отметка в заголовке на 2 секунды, потом сброс.
+    update_window_title(app, L" — сохранено ✔");
+    SetTimer(app.window, 1, 2000, nullptr);
 }
 
 // true — можно продолжать; false — пользователь отменил (Cancel).
@@ -327,6 +319,7 @@ void switch_active_list(TodoApp& app, const std::string& new_list_name) {
     render_numbered_tasks(app.tasks_edit, app.tasks);
     app.random_range = {0, 0};
     restore_combobox_selection(app);
+    update_window_title(app);
 }
 
 void on_list_selected(TodoApp& app) {
@@ -596,8 +589,9 @@ void on_close(TodoApp& app) {
 
     RECT rect;
     GetWindowRect(app.window, &rect);
-    save_window_size(get_base_dir() / L"window_state.json", rect.right - rect.left,
-                     rect.bottom - rect.top);
+    save_window_geometry(get_base_dir() / L"window_state.json",
+                         rect.right - rect.left, rect.bottom - rect.top,
+                         rect.left, rect.top);
     DestroyWindow(app.window);
 }
 
@@ -745,22 +739,26 @@ TodoApp::TodoApp(HINSTANCE instance) : instance(instance) {
     save_accel.cmd = IDM_SAVE;
     accelerator = CreateAcceleratorTableW(&save_accel, 1);
 
-    // Дефолт (0/0) означает «файла ещё не было»: дефолтный размер масштабируем
-    // под DPI; сохранённые значения — физические пиксели прошлого запуска,
-    // их не масштабируем, иначе окно растёт с каждым запуском на высоком DPI.
-    int saved_width = 0;
-    int saved_height = 0;
-    std::tie(saved_width, saved_height) = load_window_size(
-        get_base_dir() / L"window_state.json", 0, 0);
-    const UINT system_dpi = GetDpiForSystem();
-    if (0 == saved_width || 0 == saved_height) {
-        saved_width = scale_px(DEFAULT_WIDTH, system_dpi);
-        saved_height = scale_px(DEFAULT_HEIGHT, system_dpi);
+    // Геометрия первого запуска (дефолт): масштабируем под системный DPI.
+    // Сохранённые пиксели не масштабируем — это координаты прошлого запуска,
+    // иначе окно растёт с каждым запуском на высоком DPI.
+    const WindowGeometry geometry =
+        load_window_geometry(get_base_dir() / L"window_state.json", 0, 0);
+    int opened_width = scale_px(DEFAULT_WIDTH, GetDpiForSystem());
+    int opened_height = scale_px(DEFAULT_HEIGHT, GetDpiForSystem());
+    if (geometry.width > 0 && geometry.height > 0) {
+        opened_width = geometry.width;
+        opened_height = geometry.height;
+        if (geometry.has_position) {
+            saved_x = geometry.x;
+            saved_y = geometry.y;
+            restore_position = true;
+        }
     }
 
     window = CreateWindowExW(0, WINDOW_CLASS, WINDOW_TITLE, WS_OVERLAPPEDWINDOW,
-                             CW_USEDEFAULT, CW_USEDEFAULT, saved_width, saved_height,
-                             nullptr, nullptr, instance, this);
+                             CW_USEDEFAULT, CW_USEDEFAULT, opened_width,
+                             opened_height, nullptr, nullptr, instance, this);
 }
 
 LRESULT CALLBACK TodoApp::window_proc(HWND window, UINT message, WPARAM wparam,
@@ -827,6 +825,11 @@ LRESULT TodoApp::handle(UINT message, WPARAM wparam, LPARAM lparam) {
         case WM_COMMAND:
             handle_command(*this, LOWORD(wparam), HIWORD(wparam));
             return 0;
+        case WM_TIMER:
+            // Отметка «сохранено» в заголовке истекла (таймер id 1 из save_with_message).
+            KillTimer(window, wparam);
+            update_window_title(*this);
+            return 0;
         case WM_CLOSE:
             on_close(*this);
             return 0;
@@ -854,16 +857,22 @@ int TodoApp::run(int show_command) {
     tasks = list_service->get_active_tasks();
     render_numbered_tasks(tasks_edit, tasks);
     layout_controls(*this);
+    update_window_title(*this);
 
-    // Окно по центру, как в питоновской center_window.
+    // Позиция: сохранённая прошлого запуска, при первом запуске — центр экрана.
     RECT rect;
     GetWindowRect(window, &rect);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
-    SetWindowPos(window, nullptr,
-                 (GetSystemMetrics(SM_CXSCREEN) - width) / 2,
-                 (GetSystemMetrics(SM_CYSCREEN) - height) / 2, 0, 0,
-                 SWP_NOSIZE | SWP_NOZORDER);
+    if (restore_position) {
+        SetWindowPos(window, nullptr, saved_x, saved_y, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER);
+    } else {
+        SetWindowPos(window, nullptr,
+                     (GetSystemMetrics(SM_CXSCREEN) - width) / 2,
+                     (GetSystemMetrics(SM_CYSCREEN) - height) / 2, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER);
+    }
 
     ShowWindow(window, show_command);
     UpdateWindow(window);
@@ -898,6 +907,28 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show_command) {
                     MB_OK | MB_ICONERROR);
         return 1;
     }
+
+    // Один экземпляр на сессию: второй запуск просто выдвигает существующее окно.
+    HANDLE single_instance = CreateMutexW(nullptr, FALSE,
+                                          L"Local\\TaskMaster.SingleInstance");
+    const bool already_running = single_instance != nullptr &&
+                                 ERROR_ALREADY_EXISTS == GetLastError();
+    if (already_running) {
+        HWND existing = FindWindowW(taskmaster::WINDOW_CLASS, nullptr);
+        if (existing != nullptr) {
+            if (IsIconic(existing)) {
+                ShowWindow(existing, SW_RESTORE);
+            }
+            SetForegroundWindow(existing);
+        }
+        if (single_instance != nullptr) {
+            CloseHandle(single_instance);
+        }
+        return 0;
+    }
+
     taskmaster::TodoApp app(instance);
-    return app.run(show_command);
+    const int exit_code = app.run(show_command);
+    CloseHandle(single_instance);
+    return exit_code;
 }

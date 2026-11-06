@@ -26,6 +26,11 @@ public:
     std::unique_ptr<ListService> list_service;
     std::vector<std::string> tasks;           // сохраненное состояние активного списка
 
+    // Позиция прошлого запуска из window_state.json; применяется в run().
+    int saved_x = 0;
+    int saved_y = 0;
+    bool restore_position = false;
+
     HINSTANCE instance = nullptr;
     HWND window = nullptr;
     UINT dpi = 96;            // живой DPI монитора окна, обновляется в run()
