@@ -69,7 +69,8 @@ src/
   paths         — базовый каталог (рядом с exe)
   text          — UTF-8 ↔ UTF-16
   test_core.cpp — консольные тесты логики
-resources.rc    — иконка exe (icon.ico лежит рядом)
+app.manifest    — стиль контролов Windows 10/11 + DPI-осведомлённость (PerMonitorV2)
+resources.rc    — иконка и манифест exe (icon.ico лежит рядом)
 ```
 
 ## Лицензия

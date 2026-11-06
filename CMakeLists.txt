@@ -21,7 +21,8 @@ add_executable(TaskMaster WIN32
 
 # Программная запись UTF-8-литералов; MSVC по умолчанию читает исходники в локальной кодировке.
 # NOMINMAX: windows.h определяет макросы min/max, которые ломают std::min/std::max.
-target_compile_definitions(TaskMaster PRIVATE UNICODE _UNICODE NOMINMAX)
+# _WIN32_WINNT=0x0A00: объявления GetDpiForWindow/GetDpiForSystem (Win10+).
+target_compile_definitions(TaskMaster PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 if(MSVC)
     target_compile_options(TaskMaster PRIVATE /utf-8 /W4)
 endif()
