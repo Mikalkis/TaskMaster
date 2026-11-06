@@ -305,7 +305,7 @@ void mark_task_done(TodoApp& app) {
     CHARRANGE selection{};
     SendMessageW(app.tasks_edit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selection));
     const int caret_char = selection.cpMax;
-    const LONG line_index =
+    const LRESULT line_index =
         SendMessageW(app.tasks_edit, EM_EXLINEFROMCHAR, 0, caret_char);
     const int cursor_line = static_cast<int>(line_index) + 1;  // 1-based
     const int cursor_col = caret_char -
@@ -666,7 +666,7 @@ void create_controls(TodoApp& app) {
 }
 
 TodoApp::TodoApp(HINSTANCE instance) : instance(instance) {
-    INIT_COMMON_CONTROLSEX init = {};
+    INITCOMMONCONTROLSEX init = {};
     init.dwSize = sizeof(init);
     init.dwICC = ICC_WIN95_CLASSES;  // комбо, кнопки, подсказки
     InitCommonControlsEx(&init);
