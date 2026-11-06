@@ -53,8 +53,10 @@ void test_task_utils() {
     check(!taskmaster::is_task_done("просто задача"), "not done cyrillic");
     check(!taskmaster::is_task_done("✋ рука"), "not done other emoji");
 
-    vk_right("купить молоко", taskmaster::add_done_mark("купить молоко"), "add done mark");
-    vk_right("работа", taskmaster::add_done_mark(std::string(UTF8_DONE_EMOJI) + "  работа"),
+    vk_right(std::string(UTF8_DONE_EMOJI) + " купить молоко",
+             taskmaster::add_done_mark("купить молоко"), "add done mark");
+    vk_right(std::string(UTF8_DONE_EMOJI) + " работа",
+             taskmaster::add_done_mark(std::string(UTF8_DONE_EMOJI) + "  работа"),
              "add done mark idempotent");
     vk_right("работа", taskmaster::remove_done_mark(std::string(UTF8_DONE_EMOJI) + " работа"),
              "remove done mark");
@@ -62,8 +64,8 @@ void test_task_utils() {
 
     vk_right(std::string(UTF8_DONE_EMOJI) + " a", taskmaster::toggle_done_mark("a"), "toggle on");
     vk_right("a", taskmaster::toggle_done_mark(std::string(UTF8_DONE_EMOJI) + " a"), "toggle off");
-    // Идемпотентность питоновского багфикса: двойной вызов не даёт две метки.
-    vk_right(std::string(UTF8_DONE_EMOJI) + " a", taskmaster::toggle_done_mark(taskmaster::toggle_done_mark("a")),
+    // Идемпотентность питоновского багфикса: двойной вызов возвращает исходный текст.
+    vk_right("a", taskmaster::toggle_done_mark(taskmaster::toggle_done_mark("a")),
              "toggle double round");
 
     vk_right("мыть посуду", taskmaster::normalize_task_line("12. мыть посуду"), "normalize numbered");
