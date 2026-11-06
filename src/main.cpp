@@ -52,6 +52,14 @@ HFONT make_font(const wchar_t* face, int height, bool bold) {
                        DEFAULT_PITCH | FF_DONTCARE, face);
 }
 
+// Приводит логическую величину (рассчитанную на 96 dpi) к физическим пикселям.
+int scale_px(int value, UINT dpi) {
+    if (96 == dpi) {
+        return value;
+    }
+    return MulDiv(value, static_cast<int>(dpi), 96);
+}
+
 // Текст RichEdit через GETTEXTEX: UTF-8, разделитель строк \r\n.
 std::string get_edit_text(HWND edit) {
     const int length = static_cast<int>(SendMessageW(edit, WM_GETTEXTLENGTH, 0, 0));
@@ -74,6 +82,15 @@ std::string get_edit_text(HWND edit) {
         content.pop_back();
     }
     return content;
+}
+
+// UTF-16 длина ведущей метки задачи: ✅/✔ занимают одну кодовую единицу; иначе 0.
+int done_mark_utf16_len(const std::string& task) {
+    if (task.compare(0, 3, "\xE2\x9C\x85") == 0 ||  // ✅
+        task.compare(0, 3, "\xE2\x9C\x94") == 0) {  // ✔
+        return 1;
+    }
+    return 0;
 }
 
 }  // namespace
@@ -120,13 +137,34 @@ void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
     int offset = 0;
     for (size_t i = 0; i < tasks.size(); ++i) {
         const int length = line_length_utf16[i];
-        const int line_end = offset + length;   // до \r
+        const int line_start = offset;
         offset += length + 2;                   // \r\n
-        if (is_task_done(tasks[i])) {
-            CHARRANGE range{line_end - length, line_end};
-            SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&range));
+        if (!is_task_done(tasks[i])) {
+            continue;
+        }
+        CHARRANGE range{line_start, line_start + length};
+        SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&range));
+        SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
+                     reinterpret_cast<LPARAM>(&done_format));
+
+        // Метке ✅ явно назначаем Segoe UI Emoji: без этого RichEdit рисует её
+        // монохромным фолбэком, и строка выглядит пёстро (серый значок на зелёном).
+        const int mark_len = done_mark_utf16_len(tasks[i]);
+        if (mark_len > 0) {
+            const int numbering = static_cast<int>(
+                to_utf16(std::to_string(i + 1) + ". ").size());
+            CHARFORMAT2W mark_format = {};
+            mark_format.cbSize = sizeof(mark_format);
+            mark_format.dwMask = CFM_COLOR | CFM_FACE | CFM_CHARSET;
+            mark_format.crTextColor = DONE_COLOR;
+            mark_format.bCharSet = DEFAULT_CHARSET;
+            wcscpy_s(mark_format.szFaceName, L"Segoe UI Emoji");
+            CHARRANGE mark_range{line_start + numbering,
+                                 line_start + numbering + mark_len};
+            SendMessageW(edit, EM_EXSETSEL, 0,
+                         reinterpret_cast<LPARAM>(&mark_range));
             SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
-                         reinterpret_cast<LPARAM>(&done_format));
+                         reinterpret_cast<LPARAM>(&mark_format));
         }
     }
 
@@ -437,8 +475,9 @@ void create_new_list(TodoApp& app) {
     ListDialogState state;
     RECT owner_rect;
     GetWindowRect(app.window, &owner_rect);
-    const int dialog_width = 260;
-    const int dialog_height = 140;
+    const UINT dpi = app.dpi;
+    const int dialog_width = scale_px(260, dpi);
+    const int dialog_height = scale_px(140, dpi);
     const int dialog_x = owner_rect.left +
         (owner_rect.right - owner_rect.left - dialog_width) / 2;
     const int dialog_y = owner_rect.top +
@@ -454,24 +493,28 @@ void create_new_list(TodoApp& app) {
         return;
     }
     CreateWindowExW(0, L"STATIC", L"Введите имя нового списка:",
-                    WS_CHILD | WS_VISIBLE, 12, 12, 224, 20, dialog, nullptr,
+                    WS_CHILD | WS_VISIBLE, scale_px(12, dpi), scale_px(12, dpi),
+                    scale_px(224, dpi), scale_px(20, dpi), dialog, nullptr,
                     app.instance, nullptr);
     HWND name_edit =
         CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", nullptr,
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                        12, 40, 224, 24, dialog,
+                        scale_px(12, dpi), scale_px(40, dpi), scale_px(224, dpi),
+                        scale_px(24, dpi), dialog,
                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_NEW_NAME_EDIT)),
                         app.instance, nullptr);
     SendMessageW(name_edit, WM_SETFONT,
                  reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
     CreateWindowExW(0, L"BUTTON", L"OK",
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                    12, 76, 80, 26, dialog,
+                    scale_px(12, dpi), scale_px(76, dpi), scale_px(80, dpi),
+                    scale_px(26, dpi), dialog,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
                     app.instance, nullptr);
     CreateWindowExW(0, L"BUTTON", L"Отмена",
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                    100, 76, 80, 26, dialog,
+                    scale_px(100, dpi), scale_px(76, dpi), scale_px(80, dpi),
+                    scale_px(26, dpi), dialog,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
                     app.instance, nullptr);
 
@@ -514,22 +557,28 @@ void layout_controls(TodoApp& app) {
     GetClientRect(app.window, &client);
     const int width = client.right - client.left;
     const int height = client.bottom - client.top;
+    const UINT dpi = app.dpi;
 
-    const int combo_width = std::min(150, std::max(width - 180, 60));
-    SetWindowPos(app.list_combo, nullptr, 12, 8, combo_width, 24, SWP_NOZORDER);
+    const int combo_width =
+        std::min(scale_px(150, dpi), std::max(width - scale_px(180, dpi), scale_px(60, dpi)));
+    SetWindowPos(app.list_combo, nullptr, scale_px(12, dpi), scale_px(8, dpi),
+                 combo_width, scale_px(24, dpi), SWP_NOZORDER);
 
-    int next_x = 12 + combo_width + 6;
+    int next_x = scale_px(12, dpi) + combo_width + scale_px(6, dpi);
     for (int id : {IDC_BTN_NEW_LIST, IDC_BTN_SAVE, IDC_BTN_DONE, IDC_BTN_RANDOM}) {
-        SetWindowPos(GetDlgItem(app.window, id), nullptr, next_x, 7, 34, 26,
-                     SWP_NOZORDER);
-        next_x += 40;
+        SetWindowPos(GetDlgItem(app.window, id), nullptr, next_x, scale_px(6, dpi),
+                     scale_px(36, dpi), scale_px(28, dpi), SWP_NOZORDER);
+        next_x += scale_px(40, dpi);
     }
 
-    SetWindowPos(app.title_label, nullptr, 0, 40, width, 28, SWP_NOZORDER);
+    SetWindowPos(app.title_label, nullptr, 0, scale_px(40, dpi), width,
+                 scale_px(28, dpi), SWP_NOZORDER);
 
-    const int edit_top = 72;
-    SetWindowPos(app.tasks_edit, nullptr, 12, edit_top, std::max(width - 24, 40),
-                 std::max(height - edit_top - 12, 40), SWP_NOZORDER);
+    const int edit_top = scale_px(72, dpi);
+    SetWindowPos(app.tasks_edit, nullptr, scale_px(12, dpi), edit_top,
+                 std::max(width - scale_px(24, dpi), scale_px(40, dpi)),
+                 std::max(height - edit_top - scale_px(12, dpi), scale_px(40, dpi)),
+                 SWP_NOZORDER);
 }
 
 void on_close(TodoApp& app) {
@@ -589,17 +638,20 @@ void add_tooltip(TodoApp& app, HWND control, const wchar_t* text) {
 }
 
 void create_controls(TodoApp& app) {
+    const UINT dpi = app.dpi;
+
     app.list_combo =
         CreateWindowExW(0, WC_COMBOBOXW, nullptr,
-                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 12, 8,
-                        140, 200, app.window,
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                        scale_px(12, dpi), scale_px(8, dpi), scale_px(140, dpi),
+                        scale_px(200, dpi), app.window,
                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LIST_COMBO)),
                         app.instance, nullptr);
 
     app.title_label =
         CreateWindowExW(0, L"STATIC", L"Мои задачи",
-                        WS_CHILD | WS_VISIBLE | SS_CENTER, 0, 40, DEFAULT_WIDTH, 28,
-                        app.window,
+                        WS_CHILD | WS_VISIBLE | SS_CENTER, 0, scale_px(40, dpi),
+                        scale_px(DEFAULT_WIDTH, dpi), scale_px(28, dpi), app.window,
                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TITLE_LABEL)),
                         app.instance, nullptr);
 
@@ -608,7 +660,9 @@ void create_controls(TodoApp& app) {
                         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP |
                             ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL |
                             ES_NOHIDESEL,
-                        12, 72, DEFAULT_WIDTH - 24, DEFAULT_HEIGHT - 86, app.window,
+                        scale_px(12, dpi), scale_px(72, dpi),
+                        scale_px(DEFAULT_WIDTH - 24, dpi),
+                        scale_px(DEFAULT_HEIGHT - 86, dpi), app.window,
                         reinterpret_cast<HMENU>(
                             static_cast<INT_PTR>(IDC_TASKS_EDIT)),
                         app.instance, nullptr);
@@ -624,23 +678,23 @@ void create_controls(TodoApp& app) {
         {IDC_BTN_RANDOM, L"🎲"},
     };
     // «+» — один шрифт, три эмодзи-кнопки — другой; живут до конца сеанса.
-    app.plus_button_font = make_font(L"Arial", 11, true);
-    app.emoji_button_font = make_font(L"Segoe UI Emoji", 10, false);
+    app.plus_button_font = make_font(L"Arial", scale_px(14, dpi), true);
+    app.emoji_button_font = make_font(L"Segoe UI Emoji", scale_px(14, dpi), false);
     for (const ButtonSpec& spec : buttons) {
         const HFONT font =
             spec.id == IDC_BTN_NEW_LIST ? app.plus_button_font : app.emoji_button_font;
         HWND button =
             CreateWindowExW(0, L"BUTTON", spec.text,
                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                            0, 0, 34, 26, app.window,
+                            0, 0, scale_px(36, dpi), scale_px(28, dpi), app.window,
                             reinterpret_cast<HMENU>(static_cast<INT_PTR>(spec.id)),
                             app.instance, nullptr);
         SendMessageW(button, WM_SETFONT,
                      reinterpret_cast<WPARAM>(font), TRUE);
     }
 
-    app.title_font = make_font(L"Arial", 16, true);
-    app.edit_font = make_font(L"Arial", 12, false);
+    app.title_font = make_font(L"Arial", scale_px(20, dpi), true);
+    app.edit_font = make_font(L"Arial", scale_px(16, dpi), false);
     SendMessageW(app.title_label, WM_SETFONT,
                  reinterpret_cast<WPARAM>(app.title_font), TRUE);
     SendMessageW(app.tasks_edit, WM_SETFONT,
@@ -679,6 +733,9 @@ TodoApp::TodoApp(HINSTANCE instance) : instance(instance) {
     info.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     info.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     info.lpszClassName = WINDOW_CLASS;
+    // Иконка заголовка/панели задач из resources.rc (ресурс с id 1).
+    info.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
+    info.hIconSm = info.hIcon;
     RegisterClassExW(&info);
 
     // Акселератор Ctrl+S создаем кодом, чтобы не тянуть файл ресурсов.
@@ -688,10 +745,18 @@ TodoApp::TodoApp(HINSTANCE instance) : instance(instance) {
     save_accel.cmd = IDM_SAVE;
     accelerator = CreateAcceleratorTableW(&save_accel, 1);
 
-    int saved_width = DEFAULT_WIDTH;
-    int saved_height = DEFAULT_HEIGHT;
+    // Дефолт (0/0) означает «файла ещё не было»: дефолтный размер масштабируем
+    // под DPI; сохранённые значения — физические пиксели прошлого запуска,
+    // их не масштабируем, иначе окно растёт с каждым запуском на высоком DPI.
+    int saved_width = 0;
+    int saved_height = 0;
     std::tie(saved_width, saved_height) = load_window_size(
-        get_base_dir() / L"window_state.json", DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        get_base_dir() / L"window_state.json", 0, 0);
+    const UINT system_dpi = GetDpiForSystem();
+    if (0 == saved_width || 0 == saved_height) {
+        saved_width = scale_px(DEFAULT_WIDTH, system_dpi);
+        saved_height = scale_px(DEFAULT_HEIGHT, system_dpi);
+    }
 
     window = CreateWindowExW(0, WINDOW_CLASS, WINDOW_TITLE, WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT, saved_width, saved_height,
@@ -719,10 +784,44 @@ LRESULT TodoApp::handle(UINT message, WPARAM wparam, LPARAM lparam) {
         case WM_SIZE:
             layout_controls(*this);
             return 0;
+        case WM_DPICHANGED: {
+            // Перенос окна на монитор с другим DPI: масштабируем метрики и шрифты.
+            const UINT new_dpi = HIWORD(wparam);
+            if (0 != new_dpi) {
+                dpi = new_dpi;
+            }
+            if (title_font) {
+                DeleteObject(title_font);
+                title_font = make_font(L"Arial", scale_px(20, dpi), true);
+                SendMessageW(title_label, WM_SETFONT,
+                             reinterpret_cast<WPARAM>(title_font), TRUE);
+            }
+            if (edit_font) {
+                DeleteObject(edit_font);
+                edit_font = make_font(L"Arial", scale_px(16, dpi), false);
+                SendMessageW(tasks_edit, WM_SETFONT,
+                             reinterpret_cast<WPARAM>(edit_font), TRUE);
+            }
+            if (plus_button_font) {
+                DeleteObject(plus_button_font);
+                plus_button_font = make_font(L"Arial", scale_px(14, dpi), true);
+            }
+            if (emoji_button_font) {
+                DeleteObject(emoji_button_font);
+                emoji_button_font = make_font(L"Segoe UI Emoji", scale_px(14, dpi), false);
+            }
+            const auto* suggested = reinterpret_cast<const RECT*>(lparam);
+            SetWindowPos(window, nullptr, suggested->left, suggested->top,
+                         suggested->right - suggested->left,
+                         suggested->bottom - suggested->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            layout_controls(*this);
+            return 0;
+        }
         case WM_GETMINMAXINFO: {
             auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
-            limits->ptMinTrackSize.x = DEFAULT_WIDTH;
-            limits->ptMinTrackSize.y = DEFAULT_HEIGHT;
+            limits->ptMinTrackSize.x = scale_px(DEFAULT_WIDTH, dpi);
+            limits->ptMinTrackSize.y = scale_px(DEFAULT_HEIGHT, dpi);
             return 0;
         }
         case WM_COMMAND:
@@ -742,6 +841,12 @@ LRESULT TodoApp::handle(UINT message, WPARAM wparam, LPARAM lparam) {
 int TodoApp::run(int show_command) {
     storage = std::make_unique<TaskStorage>(get_base_dir());
     list_service = std::make_unique<ListService>(*storage);
+
+    // DPI монитора, где создалось окно; от него масштабируются все метрики.
+    dpi = GetDpiForWindow(window);
+    if (0 == dpi || 96 > dpi) {
+        dpi = GetDpiForSystem();
+    }
 
     create_controls(*this);
     refresh_list_combobox(*this);

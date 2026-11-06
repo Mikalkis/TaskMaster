@@ -28,6 +28,7 @@ public:
 
     HINSTANCE instance = nullptr;
     HWND window = nullptr;
+    UINT dpi = 96;            // живой DPI монитора окна, обновляется в run()
     HWND list_combo = nullptr;
     HWND tasks_edit = nullptr;
     HWND title_label = nullptr;
