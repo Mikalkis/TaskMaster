@@ -2,6 +2,7 @@
 
 cmake_minimum_required(VERSION 3.15)
 project(TaskMaster LANGUAGES CXX)
+enable_language(RC)  # resources.rc: .rc файлы не входят в набор CXX по умолчанию
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +20,8 @@ add_executable(TaskMaster WIN32
 )
 
 # Программная запись UTF-8-литералов; MSVC по умолчанию читает исходники в локальной кодировке.
-target_compile_definitions(TaskMaster PRIVATE UNICODE _UNICODE)
+# NOMINMAX: windows.h определяет макросы min/max, которые ломают std::min/std::max.
+target_compile_definitions(TaskMaster PRIVATE UNICODE _UNICODE NOMINMAX)
 if(MSVC)
     target_compile_options(TaskMaster PRIVATE /utf-8 /W4)
 endif()

@@ -21,7 +21,7 @@
 
 ```
 rc /fo taskmaster.res resources.rc
-cl /EHsc /utf-8 /std:c++17 /FeTaskMaster.exe src\*.cpp taskmaster.res /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib comctl32.lib
+cl /EHsc /utf-8 /std:c++17 /DUNICODE /D_UNICODE /DNOMINMAX /FeTaskMaster.exe src\*.cpp taskmaster.res /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib comctl32.lib
 ```
 
 ### CMake (MSVC или MinGW w64)
@@ -37,7 +37,7 @@ cmake --build build --config Release
 ### Консольные тесты логики
 
 ```
-cl /EHsc /utf-8 /std:c++17 /Fetests_core.exe src\test_core.cpp src\storage.cpp src\task_utils.cpp src\window_state.cpp src\file_utils.cpp src\paths.cpp src\text.cpp
+cl /EHsc /utf-8 /std:c++17 /DNOMINMAX /Fetests_core.exe src\test_core.cpp src\storage.cpp src\task_utils.cpp src\window_state.cpp src\file_utils.cpp src\paths.cpp src\text.cpp
 tests_core.exe
 ```
 
