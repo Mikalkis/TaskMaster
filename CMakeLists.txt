@@ -25,6 +25,9 @@ add_executable(TaskMaster WIN32
 target_compile_definitions(TaskMaster PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 if(MSVC)
     target_compile_options(TaskMaster PRIVATE /utf-8 /W4)
+    # Манифест (стиль контролов + DPI) уже встроен через resources.rc;
+    # автогенерация линковщика дала бы дубль ресурса (CVT1100).
+    target_link_options(TaskMaster PRIVATE /MANIFEST:NO)
 endif()
 
 target_link_libraries(TaskMaster PRIVATE user32 gdi32 comctl32)
