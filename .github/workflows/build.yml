@@ -1,0 +1,33 @@
+# Сборка exe и прогон консольных тестов на каждой ветке.
+# NuGet-restore здесь не нужен: проект собирается CMake без внешних пакетов.
+
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (CMake, генератор Visual Studio по умолчанию)
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run logic tests
+        run: |
+          & "build\Release\test_core.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaskMaster
+          path: build\Release\TaskMaster.exe
