@@ -41,6 +41,12 @@ constexpr int DEFAULT_HEIGHT = 400;
 constexpr COLORREF RANDOM_HIGHLIGHT = RGB(0xFF, 0xF2, 0xA8);
 
 constexpr wchar_t WINDOW_CLASS[] = L"TaskMasterMainWindow";
+
+// RichEdit-сообщения прокрутки; в части версий заголовков не объявлены.
+#ifndef EM_GETSCROLLPOS
+constexpr UINT EM_GETSCROLLPOS = WM_USER + 221;
+constexpr UINT EM_SETSCROLLPOS = WM_USER + 222;
+#endif
 constexpr wchar_t WINDOW_TITLE[] = L"TaskMaster";
 constexpr wchar_t DIALOG_CLASS[] = L"TaskMasterListDialog";
 
@@ -90,8 +96,15 @@ std::string get_edit_text(HWND edit) {
 namespace {
 
 // Полная перерисовка поля задач: нумерация и ✔ у выполненных, без раскраски строк.
-void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
+// keep_scroll — вернуть прежнее положение прокрутки (WM_SETTEXT сбрасывает её к началу).
+void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks,
+                           bool keep_scroll = false) {
     const char DONE_MARK_CHECK_UTF8[] = "\xE2\x9C\x94";  // ✔
+
+    POINT scroll = {0, 0};
+    if (keep_scroll) {
+        SendMessageW(edit, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll));
+    }
 
     std::string rendered;
     for (size_t i = 0; i < tasks.size(); ++i) {
@@ -104,6 +117,10 @@ void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
 
     SendMessageW(edit, WM_SETTEXT, 0,
                  reinterpret_cast<LPARAM>(to_utf16(rendered).c_str()));
+
+    if (keep_scroll) {
+        SendMessageW(edit, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll));
+    }
 }
 
 // Контекст модального окна «Новый список».
@@ -194,7 +211,8 @@ bool has_unsaved_changes(TodoApp& app) {
 void save_current_tasks(TodoApp& app) {
     app.tasks = get_tasks_from_text(app);
     app.list_service->save_active_tasks(app.tasks);
-    render_numbered_tasks(app.tasks_edit, app.tasks);
+    // Список тот же — прокрутку сохраняем; при последующей смене списка она сбросится.
+    render_numbered_tasks(app.tasks_edit, app.tasks, true);
     app.random_range = {0, 0};
 }
 
@@ -307,7 +325,8 @@ void mark_task_done(TodoApp& app) {
         toggle_done_mark(app.tasks[static_cast<size_t>(task_index)]);
 
     app.list_service->save_active_tasks(app.tasks);
-    render_numbered_tasks(app.tasks_edit, app.tasks);
+    // Галочку переключили — список должен остаться на месте, не прыгать к началу.
+    render_numbered_tasks(app.tasks_edit, app.tasks, true);
     app.random_range = {0, 0};
 
     // Возврат курсора в то же место (аналог restore_cursor питоновской версии).
