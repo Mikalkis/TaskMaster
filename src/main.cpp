@@ -37,8 +37,7 @@ constexpr int IDC_NEW_NAME_EDIT = 301;
 constexpr int DEFAULT_WIDTH = 320;
 constexpr int DEFAULT_HEIGHT = 400;
 
-// Цвета как в питоновской версии.
-constexpr COLORREF DONE_COLOR = RGB(0x1F, 0x9D, 0x3A);
+// Подсветка случайной задачи, как в питоновской версии.
 constexpr COLORREF RANDOM_HIGHLIGHT = RGB(0xFF, 0xF2, 0xA8);
 
 constexpr wchar_t WINDOW_CLASS[] = L"TaskMasterMainWindow";
@@ -90,73 +89,21 @@ std::string get_edit_text(HWND edit) {
 
 namespace {
 
-// Полная перерисовка поля задач: нумерация и зелёный цвет выполненных задач.
-// Выполненные задачи отображаются монохромным ✔ (красится цветом строки);
-// сохранённый в файле ✅ тоже отображается как ✔ — покраска всегда ровная.
+// Полная перерисовка поля задач: нумерация и ✔ у выполненных, без раскраски строк.
 void render_numbered_tasks(HWND edit, const std::vector<std::string>& tasks) {
     const char DONE_MARK_CHECK_UTF8[] = "\xE2\x9C\x94";  // ✔
 
     std::string rendered;
-    std::vector<int> line_length_utf16;  // длина "N. задача" без \r\n
     for (size_t i = 0; i < tasks.size(); ++i) {
-        std::string task = tasks[i];
-        if (is_task_done(task)) {
-            task = std::string(DONE_MARK_CHECK_UTF8) + " " + remove_done_mark(task);
+        std::string text = tasks[i];
+        if (is_task_done(tasks[i])) {
+            text = std::string(DONE_MARK_CHECK_UTF8) + " " + remove_done_mark(tasks[i]);
         }
-        const std::string line = std::to_string(i + 1) + ". " + task;
-        line_length_utf16.push_back(static_cast<int>(to_utf16(line).size()));
-        rendered += line;
-        rendered += "\r\n";
+        rendered += std::to_string(i + 1) + ". " + text + "\r\n";
     }
 
-    SendMessageW(edit, WM_SETREDRAW, FALSE, 0);
     SendMessageW(edit, WM_SETTEXT, 0,
                  reinterpret_cast<LPARAM>(to_utf16(rendered).c_str()));
-
-    const int text_length =
-        static_cast<int>(SendMessageW(edit, WM_GETTEXTLENGTH, 0, 0));
-
-    // Сброс оформления по всему тексту: фон прозрачный, цвет системный.
-    CHARFORMAT2W reset_format = {};
-    reset_format.cbSize = sizeof(reset_format);
-    reset_format.dwMask = CFM_COLOR | CFM_BACKCOLOR;
-    reset_format.dwEffects = CFE_AUTOBACKCOLOR;
-    reset_format.crTextColor = GetSysColor(COLOR_WINDOWTEXT);
-    CHARRANGE whole_range{0, text_length};
-    SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&whole_range));
-    SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
-                 reinterpret_cast<LPARAM>(&reset_format));
-
-    // Зелёный для выполненных строк целиком: ✔ монохромный, красится тем же цветом.
-    CHARFORMAT2W done_format = {};
-    done_format.cbSize = sizeof(done_format);
-    done_format.dwMask = CFM_COLOR;
-    done_format.crTextColor = DONE_COLOR;
-
-    int offset = 0;
-    for (size_t i = 0; i < tasks.size(); ++i) {
-        const int length = line_length_utf16[i];
-        const int line_start = offset;
-        offset += length + 2;                   // \r\n
-        if (!is_task_done(tasks[i])) {
-            continue;
-        }
-        CHARRANGE range{line_start, line_start + length};
-        SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&range));
-        SendMessageW(edit, EM_SETCHARFORMAT, SCF_SELECTION,
-                     reinterpret_cast<LPARAM>(&done_format));
-    }
-
-    // Каретка в начало: вьюпорт RichEdit после программной заливки с
-    // отключённой отрисовкой остаётся «пустым» до первой прокрутки;
-    // SCARET+принудительная перерисовка инициализирует его.
-    CHARRANGE caret_top{0, 0};
-    SendMessageW(edit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&caret_top));
-    SendMessageW(edit, EM_SCROLLCARET, 0, 0);
-
-    SendMessageW(edit, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(edit, nullptr, TRUE);
-    UpdateWindow(edit);
 }
 
 // Контекст модального окна «Новый список».
